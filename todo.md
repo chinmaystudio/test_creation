@@ -28,4 +28,4 @@
 - [x] Flush queued student answers on every resumed attempt and enforce overdue attempt completion when an attempt is reopened.
 - [x] Gate optional face-based proctoring signals behind an actual configured provider and clear UI capability status.
 - [x] Route the default application entry point to the NeuroClass assessment portal instead of the scaffold example page.
-- [ ] Push the final NeuroClass portal code to the attached `test_creation` GitHub repository and verify the remote commit.
+- [x] Push the final NeuroClass portal code to the attached `test_creation` GitHub repository and verify the remote commit.

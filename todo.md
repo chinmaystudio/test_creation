@@ -1,0 +1,31 @@
+# Project TODO
+
+- [x] Define shared assessment, question, exam-attempt, proctoring, and analytics domain models.
+- [x] Extend the database schema and apply a migration for classroom assessments, questions, assignments, attempts, answers, and proctoring events.
+- [x] Implement teacher and student role guards plus secure assessment query helpers.
+- [x] Implement assessment lifecycle APIs, including draft, publish, schedule, archive, and duplicate actions.
+- [x] Implement a provider-agnostic server-side AI question-generation service that requires teacher review before persistence.
+- [x] Implement teacher-facing test dashboard at `/teacher/tests` with real status metrics and lifecycle actions.
+- [x] Implement the multi-step test creation wizard, including configuration, security disclosure, question builder, and preview.
+- [x] Implement the teacher question bank at `/teacher/question-bank` with filters and reusable-question actions.
+- [x] Implement the student assessment hub at `/student/tests` and a controlled assessment-taking interface.
+- [x] Implement server-authoritative attempt timing, auto-submit validation, and offline-safe answer synchronization.
+- [x] Implement proctoring event capture and conservative integrity-score calculation for teacher review.
+- [x] Implement teacher results at `/teacher/tests/[testId]/results`, question-level metrics, and data-derived insight surfaces.
+- [x] Add accessible responsive styling aligned with NeuroClass’s dark, precise, AI-native visual language.
+- [x] Add Vitest coverage for assessment lifecycle, answer timing, authorization, and integrity calculation.
+- [x] Validate the build and test suite, verify the primary routes visually, save a checkpoint, and provide the final project version.
+- [x] Implement secure banner and logo upload support for optional assessment branding.
+- [x] Tighten student-only authorization so generic and elevated non-student accounts cannot access student attempt or proctoring procedures.
+- [x] Add authorization tests for teacher, student, and generic-user assessment boundaries.
+- [x] Register and verify the required teacher assessment and question-bank routes.
+- [x] Complete the test dashboard with real question counts plus preview and schedule actions.
+- [x] Finish the wizard question builder with attached-question controls, functional navigation states, and persisted ordering.
+- [x] Add in-context edit and preview controls for attached questions in the test wizard.
+- [x] Correct the assessment sidebar’s material tokens so the navigation uses the intended graphite NeuroClass surface.
+- [x] Expand the question bank with required filters, edit, duplicate, add-to-test, and random-selection actions.
+- [x] Resolve TypeScript validation for the result-release and student-result flow, then verify routes and analytics rendering.
+- [x] Flush queued student answers on every resumed attempt and enforce overdue attempt completion when an attempt is reopened.
+- [x] Gate optional face-based proctoring signals behind an actual configured provider and clear UI capability status.
+- [x] Route the default application entry point to the NeuroClass assessment portal instead of the scaffold example page.
+- [ ] Push the final NeuroClass portal code to the attached `test_creation` GitHub repository and verify the remote commit.

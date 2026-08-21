@@ -1,65 +1,44 @@
-import { COOKIE_NAME, ONE_YEAR_MS, OAUTH_STATE_COOKIE, decodeOAuthState } from "@shared/const";
-import { parse as parseCookieHeader } from "cookie";
+import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
 import type { Express, Request, Response } from "express";
 import * as db from "../db";
+import { ENV } from "./env";
 import { getSessionCookieOptions } from "./cookies";
 import { sdk } from "./sdk";
 
-function getQueryParam(req: Request, key: string): string | undefined {
-  const value = req.query[key];
+function query(req: Request, name: string) {
+  const value = req.query[name];
   return typeof value === "string" ? value : undefined;
 }
 
-export function registerOAuthRoutes(app: Express) {
-  app.get("/api/oauth/callback", async (req: Request, res: Response) => {
-    const code = getQueryParam(req, "code");
-    const state = getQueryParam(req, "state");
+export function registerAuthRoutes(app: Express) {
+  app.get("/health", (_req, res) => res.status(200).json({ ok: true, auth: "supabase-handoff" }));
 
-    if (!code || !state) {
-      res.status(400).json({ error: "code and state are required" });
-      return;
-    }
+  app.get("/api/auth/handoff", async (req: Request, res: Response) => {
+    const token = query(req, "token");
+    const redirect = query(req, "redirect") || "/";
+    if (!token) return res.status(400).json({ error: "handoff token is required" });
+    const identity = await sdk.verifyHandoff(token);
+    if (!identity) return res.status(401).json({ error: "handoff token is invalid or expired" });
+    const user = await db.upsertHandoffUser({ openId: identity.userId, email: identity.email, name: identity.name, role: identity.role });
+    if (!user) return res.status(503).json({ error: "portal database is unavailable" });
+    const session = await sdk.signSession(identity, ONE_YEAR_MS);
+    res.cookie(COOKIE_NAME, session, { ...getSessionCookieOptions(req), maxAge: ONE_YEAR_MS });
+    const safeRedirect = redirect.startsWith("/") && !redirect.startsWith("//") ? redirect : "/";
+    return res.redirect(302, safeRedirect);
+  });
 
-    // CSRF guard: the nonce in `state` must match the one-time cookie that
-    // startLogin set in the browser that began this login. An attacker can
-    // forge `state`, but cannot plant this cookie in the victim's browser.
-    const { nonce } = decodeOAuthState(state);
-    const expectedNonce = parseCookieHeader(req.headers.cookie ?? "")[OAUTH_STATE_COOKIE];
-    if (!nonce || nonce !== expectedNonce) {
-      res.status(403).json({ error: "invalid oauth state" });
-      return;
-    }
-    res.clearCookie(OAUTH_STATE_COOKIE, { path: "/", secure: true, sameSite: "none" });
-
-    try {
-      const tokenResponse = await sdk.exchangeCodeForToken(code, state);
-      const userInfo = await sdk.getUserInfo(tokenResponse.accessToken);
-
-      if (!userInfo.openId) {
-        res.status(400).json({ error: "openId missing from user info" });
-        return;
-      }
-
-      await db.upsertUser({
-        openId: userInfo.openId,
-        name: userInfo.name || null,
-        email: userInfo.email ?? null,
-        loginMethod: userInfo.loginMethod ?? userInfo.platform ?? null,
-        lastSignedIn: new Date(),
-      });
-
-      const sessionToken = await sdk.createSessionToken(userInfo.openId, {
-        name: userInfo.name || "",
-        expiresInMs: ONE_YEAR_MS,
-      });
-
-      const cookieOptions = getSessionCookieOptions(req);
-      res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
-
-      res.redirect(302, "/");
-    } catch (error) {
-      console.error("[OAuth] Callback failed", error);
-      res.status(500).json({ error: "OAuth callback failed" });
-    }
+  app.post("/api/auth/dev", async (req: Request, res: Response) => {
+    if (!ENV.devAuthEnabled) return res.status(404).json({ error: "not found" });
+    const identity = {
+      userId: String(req.body?.userId || "local-dev-user"),
+      email: String(req.body?.email || "dev@example.com"),
+      name: String(req.body?.name || "Local Developer"),
+      role: (req.body?.role === "student" ? "student" : "teacher") as "teacher" | "student",
+    };
+    const user = await db.upsertHandoffUser({ openId: identity.userId, email: identity.email, name: identity.name, role: identity.role });
+    if (!user) return res.status(503).json({ error: "portal database is unavailable" });
+    const session = await sdk.signSession(identity, ONE_YEAR_MS);
+    res.cookie(COOKIE_NAME, session, { ...getSessionCookieOptions(req), maxAge: ONE_YEAR_MS });
+    return res.json({ ok: true, user: { email: identity.email, role: identity.role } });
   });
 }

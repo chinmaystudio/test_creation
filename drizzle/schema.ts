@@ -12,7 +12,7 @@ export const users = pgTable("tc_users", {
    * Use this for relations between tables.
    */
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
-  /** Manus OAuth identifier (openId) returned from the OAuth callback. Unique per user. */
+  /** Supabase identity UUID from the NeuroClass signed handoff. Unique per user. */
   openId: varchar("openId", { length: 64 }).notNull().unique(),
   name: text("name"),
   email: varchar("email", { length: 320 }),

@@ -106,3 +106,22 @@ export function getSql() {
 }
 
 // TODO: add feature queries here as your schema grows.
+
+
+export async function upsertHandoffUser(input: { openId: string; email: string; name: string; role: "teacher" | "student" | "admin" }) {
+  const db = await getDb();
+  if (!db) return undefined;
+  await db.insert(users).values({
+    openId: input.openId,
+    email: input.email,
+    name: input.name,
+    role: input.role,
+    loginMethod: "supabase-handoff",
+    lastSignedIn: new Date(),
+  }).onConflictDoUpdate({
+    target: users.openId,
+    set: { email: input.email, name: input.name, role: input.role, loginMethod: "supabase-handoff", lastSignedIn: new Date(), updatedAt: new Date() },
+  });
+  const result = await db.select().from(users).where(eq(users.openId, input.openId)).limit(1);
+  return result[0];
+}

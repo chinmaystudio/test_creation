@@ -5,6 +5,7 @@ import { InsertUser, users } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
+let _sql: ReturnType<typeof postgres> | null = null;
 
 // Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
@@ -90,6 +91,18 @@ export async function getUserByOpenId(openId: string) {
   const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
 
   return result.length > 0 ? result[0] : undefined;
+}
+
+export function getSql() {
+  if (!_sql && process.env.DATABASE_URL) {
+    try {
+      _sql = postgres(process.env.DATABASE_URL, { max: 5, prepare: false });
+    } catch (error) {
+      console.warn("[Database] Failed to create shared SQL client:", error);
+      _sql = null;
+    }
+  }
+  return _sql;
 }
 
 // TODO: add feature queries here as your schema grows.

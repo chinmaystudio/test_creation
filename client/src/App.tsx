@@ -14,6 +14,7 @@ import StudentExam from "./pages/StudentExam";
 import StudentTests from "./pages/StudentTests";
 import StudentResult from "./pages/StudentResult";
 import TeacherResults from "./pages/TeacherResults";
+import ClassroomPortal from "./pages/ClassroomPortal";
 
 function Router() {
   // make sure to consider if you need authentication for certain routes
@@ -25,6 +26,7 @@ function Router() {
       <Route path={"/teacher/tests/:testId/preview"} component={TeacherPreview} />
       <Route path={"/teacher/question-bank"} component={QuestionBank} />
       <Route path={"/teacher/tests/:testId/results"} component={TeacherResults} />
+      <Route path={"/classroom/:classroomId"} component={ClassroomPortal} />
       <Route path={"/student/tests"} component={StudentTests} />
       <Route path={"/student/tests/:testId/check"} component={PreExamCheck} />
       <Route path={"/student/tests/:testId/attempt"} component={StudentExam} />

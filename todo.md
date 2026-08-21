@@ -46,3 +46,4 @@
 - [x] Resolve TypeScript validation for the browser feature sampler and pre-exam calibration workflow.
 - [x] Resolve strict result narrowing for continuous ML feature-analysis status in the examination client.
 - [x] Gate the timed examination transition on completed baseline calibration or the teacher-selected explicit fallback policy.
+- [ ] Remove local Python bytecode artifacts from the repository and prevent them from being included in future source pushes.

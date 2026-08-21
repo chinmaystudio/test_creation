@@ -30,6 +30,13 @@ export type SecurityConfiguration = {
   multipleFaceDetection: boolean;
   unknownFaceDetection: boolean;
   suspiciousBehaviourLogging: boolean;
+  aiProctoringEnabled: boolean;
+  proctoringFailurePolicy: "block" | "warn" | "fallback_browser_signals" | "manual_review";
+  proctoringSamplingHz: number;
+  baselineSeconds: number;
+  minimumEventSeconds: number;
+  eventCooldownSeconds: number;
+  storeEvidenceSnapshots: boolean;
 };
 
 export const DEFAULT_SECURITY_CONFIGURATION: SecurityConfiguration = {
@@ -41,6 +48,13 @@ export const DEFAULT_SECURITY_CONFIGURATION: SecurityConfiguration = {
   multipleFaceDetection: false,
   unknownFaceDetection: false,
   suspiciousBehaviourLogging: true,
+  aiProctoringEnabled: false,
+  proctoringFailurePolicy: "warn",
+  proctoringSamplingHz: 1,
+  baselineSeconds: 20,
+  minimumEventSeconds: 4,
+  eventCooldownSeconds: 20,
+  storeEvidenceSnapshots: false,
 };
 
 export type TestConfiguration = {

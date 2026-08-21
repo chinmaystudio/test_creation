@@ -1,0 +1,1 @@
+ALTER TABLE `test_attempts` MODIFY COLUMN `status` enum('calibrating','in_progress','submitted','reviewed','expired') NOT NULL DEFAULT 'in_progress';

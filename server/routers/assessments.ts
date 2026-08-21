@@ -6,6 +6,7 @@ import {
   aiGenerationLogs,
   attemptAnswers,
   classrooms,
+  proctoringAttemptStates,
   proctoringEvents,
   questionOptions,
   questions,
@@ -28,8 +29,10 @@ import { getDb } from "../db";
 import { aiProvider } from "../services/aiProvider";
 import { calculateIntegrityScore } from "../services/integrity";
 import { isAttemptExpired, validatePublication } from "../services/assessmentLifecycle";
+import { analyzeMlFeatures, finalizeMlBaseline, isMlProctoringConfigured, mlServiceHealth, startMlBaseline, updateMlBaseline, type MlFeatureVector } from "../services/mlProctoringClient";
+import { directBrowserSeverity, serviceFailureBlocksAttempt, timedAttemptEligibility } from "../services/proctoringPolicy";
 import { storagePut } from "../storage";
-import { protectedProcedure, router } from "../_core/trpc";
+import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 
 const teacherProcedure = protectedProcedure.use(async ({ ctx, next }) => {
   if (ctx.user.role !== "teacher" && ctx.user.role !== "admin") {
@@ -71,7 +74,22 @@ const securityConfigurationSchema = z.object({
   multipleFaceDetection: z.boolean(),
   unknownFaceDetection: z.boolean(),
   suspiciousBehaviourLogging: z.boolean(),
+  aiProctoringEnabled: z.boolean(),
+  proctoringFailurePolicy: z.enum(["block", "warn", "fallback_browser_signals", "manual_review"]),
+  proctoringSamplingHz: z.number().int().min(1).max(5),
+  baselineSeconds: z.number().int().min(5).max(90),
+  minimumEventSeconds: z.number().int().min(1).max(60),
+  eventCooldownSeconds: z.number().int().min(3).max(300),
+  storeEvidenceSnapshots: z.boolean(),
 });
+
+const mlFeatureVectorSchema = z.object({
+  facePresent: z.boolean().optional(), faceCount: z.number().int().min(0).max(10).optional(),
+  faceBboxArea: z.number().min(0).max(1).optional(), faceCenterX: z.number().min(0).max(1).optional(), faceCenterY: z.number().min(0).max(1).optional(),
+  headPoseYaw: z.number().min(-180).max(180).optional(), headPosePitch: z.number().min(-180).max(180).optional(), headPoseRoll: z.number().min(-180).max(180).optional(),
+  gazeHorizontal: z.number().min(-1).max(1).optional(), gazeVertical: z.number().min(-1).max(1).optional(), landmarkStability: z.number().min(0).max(1).optional(),
+  faceQuality: z.number().min(0).max(1).optional(), frameQuality: z.number().min(0).max(1).optional(), movementScore: z.number().min(0).max(1).optional(), provider: z.string().min(1).max(80).optional(),
+}).strict();
 
 const questionInputSchema = z.object({
   type: questionTypeSchema,
@@ -111,6 +129,19 @@ async function ownedTest(testId: string, teacherId: number) {
     .limit(1);
   if (!test) throw new TRPCError({ code: "NOT_FOUND", message: "Assessment not found." });
   return { db, test };
+}
+
+async function activeStudentAttempt(attemptId: string, studentId: number, allowCalibrating = false) {
+  const db = requireDb(await getDb());
+  const [attempt] = await db.select().from(testAttempts).where(and(eq(testAttempts.id, attemptId), eq(testAttempts.studentId, studentId))).limit(1);
+  if (!attempt || (attempt.status !== "in_progress" && (!allowCalibrating || attempt.status !== "calibrating"))) throw new TRPCError({ code: "BAD_REQUEST", message: "Active attempt not found." });
+  const [test] = await db.select().from(tests).where(eq(tests.id, attempt.testId)).limit(1);
+  if (!test) throw new TRPCError({ code: "NOT_FOUND", message: "Assessment not found." });
+  return { db, attempt, test, security: parseConfig<SecurityConfiguration>(test.securityConfig, DEFAULT_SECURITY_CONFIGURATION) };
+}
+
+async function setProctoringState(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, attemptId: string, values: { baseline: Record<string, unknown>; temporalState: Record<string, unknown>; modelVersion?: string | null; lastRiskScore?: number | null; lastRiskLevel?: "low" | "medium" | "high" | null; serviceStatus: "ready" | "unavailable" | "fallback" }) {
+  await db.insert(proctoringAttemptStates).values({ attemptId, baseline: JSON.stringify(values.baseline), temporalState: JSON.stringify(values.temporalState), modelVersion: values.modelVersion ?? null, lastRiskScore: values.lastRiskScore ?? null, lastRiskLevel: values.lastRiskLevel ?? null, serviceStatus: values.serviceStatus }).onDuplicateKeyUpdate({ set: { baseline: JSON.stringify(values.baseline), temporalState: JSON.stringify(values.temporalState), modelVersion: values.modelVersion ?? null, lastRiskScore: values.lastRiskScore ?? null, lastRiskLevel: values.lastRiskLevel ?? null, serviceStatus: values.serviceStatus, updatedAt: new Date() } });
 }
 
 function normalizeAnswer(value: string): string {
@@ -449,25 +480,50 @@ export const assessmentRouter = router({
     }),
   }),
   attempts: router({
-    start: studentProcedure.input(z.object({ testId: z.string().min(1) })).mutation(async ({ ctx, input }) => {
+    start: studentProcedure.input(z.object({ testId: z.string().min(1), preflight: z.boolean().optional() })).mutation(async ({ ctx, input }) => {
       const db = requireDb(await getDb());
       const [assignment] = await db.select().from(testAssignments).where(and(eq(testAssignments.testId, input.testId), eq(testAssignments.studentId, ctx.user.id))).limit(1);
       if (!assignment) throw new TRPCError({ code: "FORBIDDEN", message: "This assessment is not assigned to you." });
       const [test] = await db.select().from(tests).where(eq(tests.id, input.testId)).limit(1);
       if (!test || test.status !== "live") throw new TRPCError({ code: "BAD_REQUEST", message: "This assessment is not currently available." });
+      const security = parseConfig<SecurityConfiguration>(test.securityConfig, DEFAULT_SECURITY_CONFIGURATION);
+      if (security.aiProctoringEnabled && serviceFailureBlocksAttempt(security, (await mlServiceHealth()).ready)) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This protected assessment cannot start because its required AI proctoring service is unavailable." });
+      }
       const now = new Date();
       if (test.scheduledStart && now < test.scheduledStart) throw new TRPCError({ code: "BAD_REQUEST", message: "The assessment has not started." });
       if (test.scheduledEnd && now > test.scheduledEnd) throw new TRPCError({ code: "BAD_REQUEST", message: "The assessment window has closed." });
       const [settings] = await db.select().from(testSettings).where(eq(testSettings.testId, test.id)).limit(1);
       const config = parseConfig<TestConfiguration>(settings?.config, DEFAULT_TEST_CONFIGURATION);
       const existing = await db.select().from(testAttempts).where(and(eq(testAttempts.testId, test.id), eq(testAttempts.studentId, ctx.user.id))).orderBy(desc(testAttempts.startedAt));
-      const active = existing.find(item => item.status === "in_progress");
-      if (active) return { attemptId: active.id, expiresAt: active.expiresAt, resumed: true };
+      const active = existing.find(item => item.status === "in_progress" || item.status === "calibrating");
+      if (active) return { attemptId: active.id, expiresAt: active.expiresAt, resumed: active.status === "in_progress", preflight: active.status === "calibrating" };
       if (existing.filter(item => item.status === "submitted").length >= config.attemptLimit) throw new TRPCError({ code: "FORBIDDEN", message: "The attempt limit has been reached." });
       const expiresAt = new Date(Math.min(now.getTime() + config.durationMinutes * 60_000, test.scheduledEnd?.getTime() ?? Number.MAX_SAFE_INTEGER));
       const attemptId = nanoid();
-      await db.insert(testAttempts).values({ id: attemptId, testId: test.id, studentId: ctx.user.id, startedAt: now, expiresAt });
-      return { attemptId, expiresAt, resumed: false };
+      const preflight = Boolean(input.preflight) || security.aiProctoringEnabled;
+      await db.insert(testAttempts).values({ id: attemptId, testId: test.id, studentId: ctx.user.id, status: preflight ? "calibrating" : "in_progress", startedAt: now, expiresAt });
+      return { attemptId, expiresAt, resumed: false, preflight };
+    }),
+    begin: studentProcedure.input(z.object({ attemptId: z.string().min(1) })).mutation(async ({ ctx, input }) => {
+      const { db, attempt, test } = await activeStudentAttempt(input.attemptId, ctx.user.id, true);
+      if (attempt.status === "in_progress") return { attemptId: attempt.id, expiresAt: attempt.expiresAt, resumed: true };
+      const security = parseConfig<SecurityConfiguration>(test.securityConfig, DEFAULT_SECURITY_CONFIGURATION);
+      if (security.aiProctoringEnabled) {
+        const [proctoringState] = await db.select().from(proctoringAttemptStates).where(eq(proctoringAttemptStates.attemptId, attempt.id)).limit(1);
+        const baseline = parseConfig<{ finalized?: boolean }>(proctoringState?.baseline, {});
+        const eligibility = timedAttemptEligibility(security, Boolean(baseline.finalized));
+        if (!eligibility.allowed) throw new TRPCError({ code: "PRECONDITION_FAILED", message: eligibility.reason ?? "Proctoring baseline is required." });
+        if (eligibility.fallback) {
+          await setProctoringState(db, attempt.id, { baseline: parseConfig<Record<string, unknown>>(proctoringState?.baseline, {}), temporalState: parseConfig<Record<string, unknown>>(proctoringState?.temporalState, {}), modelVersion: proctoringState?.modelVersion, lastRiskScore: proctoringState?.lastRiskScore, lastRiskLevel: proctoringState?.lastRiskLevel, serviceStatus: "fallback" });
+        }
+      }
+      const [settings] = await db.select().from(testSettings).where(eq(testSettings.testId, test.id)).limit(1);
+      const config = parseConfig<TestConfiguration>(settings?.config, DEFAULT_TEST_CONFIGURATION);
+      const now = new Date();
+      const expiresAt = new Date(Math.min(now.getTime() + config.durationMinutes * 60_000, test.scheduledEnd?.getTime() ?? Number.MAX_SAFE_INTEGER));
+      await db.update(testAttempts).set({ status: "in_progress", startedAt: now, expiresAt }).where(eq(testAttempts.id, attempt.id));
+      return { attemptId: attempt.id, expiresAt, resumed: false };
     }),
     getActive: studentProcedure.input(z.object({ attemptId: z.string().min(1) })).query(async ({ ctx, input }) => {
       const db = requireDb(await getDb());
@@ -498,7 +554,9 @@ export const assessmentRouter = router({
         answer: answerByQuestion.get(item.question.id)?.answer ?? "",
         markedForReview: Boolean(answerByQuestion.get(item.question.id)?.markedForReview),
       })));
-      return { attempt, test: { id: test.id, name: test.name, instructions: test.instructions, subject: test.subject, security: parseConfig<SecurityConfiguration>(test.securityConfig, DEFAULT_SECURITY_CONFIGURATION), proctoringProvider: { faceSignalsAvailable: false, reason: "No compatible face-analysis provider is configured for this deployment." } }, questions: studentQuestions };
+      const security = parseConfig<SecurityConfiguration>(test.securityConfig, DEFAULT_SECURITY_CONFIGURATION);
+      const providerConfigured = security.aiProctoringEnabled && isMlProctoringConfigured();
+      return { attempt, test: { id: test.id, name: test.name, instructions: test.instructions, subject: test.subject, security, proctoringProvider: { faceSignalsAvailable: providerConfigured, reason: providerConfigured ? "Feature-vector proctoring is configured. Camera capability still depends on your browser." : security.aiProctoringEnabled ? "This assessment requests AI proctoring, but the ML service URL and key have not been configured yet." : "AI proctoring is not enabled for this assessment." } }, questions: studentQuestions };
     }),
     saveAnswer: studentProcedure.input(z.object({ attemptId: z.string(), questionId: z.number().int().positive(), answer: z.string().max(20000), markedForReview: z.boolean() })).mutation(async ({ ctx, input }) => {
       const db = requireDb(await getDb());
@@ -524,18 +582,77 @@ export const assessmentRouter = router({
     }),
   }),
   proctoring: router({
+    health: publicProcedure.query(async () => {
+      return { configured: isMlProctoringConfigured(), ...(await mlServiceHealth()) };
+    }),
     record: studentProcedure.input(z.object({
-      attemptId: z.string(),
-      eventType: z.enum(["face_missing", "multiple_faces", "tab_switch", "fullscreen_exit", "unknown_face", "focus_change"]),
-      severity: z.enum(["low", "medium", "high"]),
-      confidence: z.number().min(0).max(1).optional(),
-      metadata: z.record(z.string(), z.unknown()).optional(),
+      attemptId: z.string(), eventType: z.enum(["tab_switch", "fullscreen_exit", "focus_change"]), metadata: z.record(z.string(), z.unknown()).optional(),
     })).mutation(async ({ ctx, input }) => {
-      const db = requireDb(await getDb());
-      const [attempt] = await db.select().from(testAttempts).where(and(eq(testAttempts.id, input.attemptId), eq(testAttempts.studentId, ctx.user.id))).limit(1);
-      if (!attempt || attempt.status !== "in_progress") throw new TRPCError({ code: "BAD_REQUEST", message: "Active attempt not found." });
-      await db.insert(proctoringEvents).values({ id: nanoid(), attemptId: attempt.id, testId: attempt.testId, studentId: ctx.user.id, eventType: input.eventType, severity: input.severity, confidence: input.confidence ?? null, metadata: JSON.stringify(input.metadata ?? {}) });
+      const { db, attempt } = await activeStudentAttempt(input.attemptId, ctx.user.id);
+      await db.insert(proctoringEvents).values({ id: nanoid(), attemptId: attempt.id, testId: attempt.testId, studentId: ctx.user.id, eventType: input.eventType, severity: directBrowserSeverity(input.eventType), confidence: 1, metadata: JSON.stringify({ source: "browser", ...input.metadata }) });
       return { accepted: true };
+    }),
+    baselineStart: studentProcedure.input(z.object({ attemptId: z.string() })).mutation(async ({ ctx, input }) => {
+      const { db, attempt, security } = await activeStudentAttempt(input.attemptId, ctx.user.id, true);
+      if (!security.aiProctoringEnabled) return { enabled: false, ready: false, reason: "AI proctoring is not enabled for this assessment." };
+      const health = await mlServiceHealth();
+      if (!health.ready) {
+        if (serviceFailureBlocksAttempt(security, false)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This protected assessment requires the configured AI proctoring service, which is unavailable." });
+        await setProctoringState(db, attempt.id, { baseline: {}, temporalState: {}, serviceStatus: security.proctoringFailurePolicy === "fallback_browser_signals" ? "fallback" : "unavailable" });
+        return { enabled: true, ready: false, reason: health.reason, policy: security.proctoringFailurePolicy };
+      }
+      const baseline = await startMlBaseline(attempt.id);
+      await setProctoringState(db, attempt.id, { baseline, temporalState: {}, modelVersion: health.modelVersion, serviceStatus: "ready" });
+      return { enabled: true, ready: true, baseline, baselineSeconds: security.baselineSeconds, samplingHz: security.proctoringSamplingHz };
+    }),
+    baselineUpdate: studentProcedure.input(z.object({ attemptId: z.string(), features: mlFeatureVectorSchema })).mutation(async ({ ctx, input }) => {
+      const { db, attempt, security } = await activeStudentAttempt(input.attemptId, ctx.user.id, true);
+      if (!security.aiProctoringEnabled || !isMlProctoringConfigured()) return { ready: false };
+      const [stored] = await db.select().from(proctoringAttemptStates).where(eq(proctoringAttemptStates.attemptId, attempt.id)).limit(1);
+      if (!stored) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Start a proctoring baseline before updating it." });
+      const baseline = await updateMlBaseline(attempt.id, parseConfig<Record<string, unknown>>(stored.baseline, {}), input.features as MlFeatureVector);
+      await setProctoringState(db, attempt.id, { baseline, temporalState: parseConfig<Record<string, unknown>>(stored.temporalState, {}), modelVersion: stored.modelVersion, lastRiskScore: stored.lastRiskScore, lastRiskLevel: stored.lastRiskLevel, serviceStatus: "ready" });
+      return { ready: true, baseline };
+    }),
+    baselineFinalize: studentProcedure.input(z.object({ attemptId: z.string(), features: mlFeatureVectorSchema })).mutation(async ({ ctx, input }) => {
+      const { db, attempt, security } = await activeStudentAttempt(input.attemptId, ctx.user.id, true);
+      if (!security.aiProctoringEnabled || !isMlProctoringConfigured()) return { ready: false, baselineReady: false };
+      const [stored] = await db.select().from(proctoringAttemptStates).where(eq(proctoringAttemptStates.attemptId, attempt.id)).limit(1);
+      if (!stored) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Start a proctoring baseline before finalizing it." });
+      const baseline = await finalizeMlBaseline(attempt.id, parseConfig<Record<string, unknown>>(stored.baseline, {}), input.features as MlFeatureVector);
+      await setProctoringState(db, attempt.id, { baseline, temporalState: parseConfig<Record<string, unknown>>(stored.temporalState, {}), modelVersion: stored.modelVersion, lastRiskScore: stored.lastRiskScore, lastRiskLevel: stored.lastRiskLevel, serviceStatus: "ready" });
+      return { ready: true, baselineReady: Boolean(baseline.finalized), baseline };
+    }),
+    analyze: studentProcedure.input(z.object({ attemptId: z.string(), features: mlFeatureVectorSchema, faceVerified: z.boolean().optional() })).mutation(async ({ ctx, input }) => {
+      const { db, attempt, security } = await activeStudentAttempt(input.attemptId, ctx.user.id);
+      if (!security.aiProctoringEnabled) return { accepted: false, status: "disabled" as const };
+      const health = await mlServiceHealth();
+      if (!health.ready) {
+        if (serviceFailureBlocksAttempt(security, false)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This protected assessment requires the configured AI proctoring service, which is unavailable." });
+        const [latestFailure] = await db.select({ occurredAt: proctoringEvents.occurredAt }).from(proctoringEvents).where(and(eq(proctoringEvents.attemptId, attempt.id), eq(proctoringEvents.eventType, "service_unavailable"))).orderBy(desc(proctoringEvents.occurredAt)).limit(1);
+        if (!latestFailure || Date.now() - latestFailure.occurredAt.getTime() > 60_000) await db.insert(proctoringEvents).values({ id: nanoid(), attemptId: attempt.id, testId: attempt.testId, studentId: ctx.user.id, eventType: "service_unavailable", severity: "low", confidence: 1, metadata: JSON.stringify({ policy: security.proctoringFailurePolicy, reason: health.reason }) });
+        await setProctoringState(db, attempt.id, { baseline: {}, temporalState: {}, serviceStatus: security.proctoringFailurePolicy === "fallback_browser_signals" ? "fallback" : "unavailable" });
+        return { accepted: false, status: "unavailable" as const, policy: security.proctoringFailurePolicy };
+      }
+      const [stored] = await db.select().from(proctoringAttemptStates).where(eq(proctoringAttemptStates.attemptId, attempt.id)).limit(1);
+      if (!stored) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Complete the baseline calibration before starting AI analysis." });
+      const response = await analyzeMlFeatures({ attemptId: attempt.id, studentId: ctx.user.id, baseline: parseConfig<Record<string, unknown>>(stored.baseline, {}), temporalState: parseConfig<Record<string, unknown>>(stored.temporalState, {}), features: input.features as MlFeatureVector, faceVerified: input.faceVerified, policy: { baselineSeconds: security.baselineSeconds, minimumEventSeconds: security.minimumEventSeconds, eventCooldownSeconds: security.eventCooldownSeconds } });
+      if (response.events.length) await db.insert(proctoringEvents).values(response.events.map(event => ({ id: nanoid(), attemptId: attempt.id, testId: attempt.testId, studentId: ctx.user.id, eventType: event.event_type, severity: event.severity, confidence: event.confidence, anomalyScore: response.anomaly_score, riskScore: response.risk_score, durationSeconds: event.duration_seconds, modelVersion: response.model_version, metadata: JSON.stringify({ evidence: event.evidence, source: "ml_feature_analysis", modelVersion: response.model_version }) })));
+      await setProctoringState(db, attempt.id, { baseline: response.baseline, temporalState: response.temporal_state, modelVersion: response.model_version, lastRiskScore: response.risk_score, lastRiskLevel: response.risk_level, serviceStatus: "ready" });
+      return { accepted: true, riskScore: response.risk_score, riskLevel: response.risk_level, baselineReady: response.baseline_ready };
+    }),
+    timeline: teacherProcedure.input(z.object({ testId: z.string(), attemptId: z.string().optional() })).query(async ({ ctx, input }) => {
+      const { db, test } = await ownedTest(input.testId, ctx.user.id);
+      const conditions = [eq(proctoringEvents.testId, test.id)];
+      if (input.attemptId) conditions.push(eq(proctoringEvents.attemptId, input.attemptId));
+      return db.select({ event: proctoringEvents, student: users }).from(proctoringEvents).innerJoin(users, eq(users.id, proctoringEvents.studentId)).where(and(...conditions)).orderBy(desc(proctoringEvents.occurredAt));
+    }),
+    reviewEvent: teacherProcedure.input(z.object({ eventId: z.string(), status: z.enum(["dismissed", "concern"]) })).mutation(async ({ ctx, input }) => {
+      const db = requireDb(await getDb());
+      const [event] = await db.select({ event: proctoringEvents, test: tests }).from(proctoringEvents).innerJoin(tests, eq(tests.id, proctoringEvents.testId)).where(eq(proctoringEvents.id, input.eventId)).limit(1);
+      if (!event || event.test.creatorId !== ctx.user.id) throw new TRPCError({ code: "NOT_FOUND", message: "Proctoring event not found." });
+      await db.update(proctoringEvents).set({ reviewStatus: input.status, reviewedBy: ctx.user.id, reviewedAt: new Date() }).where(eq(proctoringEvents.id, event.event.id));
+      return { success: true };
     }),
   }),
   results: router({

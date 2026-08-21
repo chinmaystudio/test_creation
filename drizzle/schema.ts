@@ -113,7 +113,7 @@ export const testAttempts = mysqlTable("test_attempts", {
   id: varchar("id", { length: 64 }).primaryKey(),
   testId: varchar("testId", { length: 64 }).notNull().references(() => tests.id, { onDelete: "cascade" }),
   studentId: int("studentId").notNull().references(() => users.id, { onDelete: "cascade" }),
-  status: mysqlEnum("status", ["in_progress", "submitted", "reviewed", "expired"]).default("in_progress").notNull(),
+  status: mysqlEnum("status", ["calibrating", "in_progress", "submitted", "reviewed", "expired"]).default("in_progress").notNull(),
   startedAt: timestamp("startedAt").notNull(),
   expiresAt: timestamp("expiresAt").notNull(),
   submittedAt: timestamp("submittedAt"),
@@ -138,12 +138,31 @@ export const proctoringEvents = mysqlTable("proctoring_events", {
   attemptId: varchar("attemptId", { length: 64 }).notNull().references(() => testAttempts.id, { onDelete: "cascade" }),
   testId: varchar("testId", { length: 64 }).notNull().references(() => tests.id, { onDelete: "cascade" }),
   studentId: int("studentId").notNull().references(() => users.id, { onDelete: "cascade" }),
-  eventType: mysqlEnum("eventType", ["face_missing", "multiple_faces", "tab_switch", "fullscreen_exit", "unknown_face", "focus_change"]).notNull(),
+  eventType: mysqlEnum("eventType", ["face_missing", "multiple_faces", "tab_switch", "fullscreen_exit", "unknown_face", "focus_change", "head_away", "gaze_deviation", "camera_obstructed", "behavior_anomaly", "service_unavailable"]).notNull(),
   severity: mysqlEnum("severity", ["low", "medium", "high"]).notNull(),
   confidence: double("confidence"),
+  anomalyScore: double("anomalyScore"),
+  riskScore: double("riskScore"),
+  durationSeconds: double("durationSeconds"),
+  evidenceKey: varchar("evidenceKey", { length: 500 }),
+  modelVersion: varchar("modelVersion", { length: 100 }),
+  reviewStatus: mysqlEnum("reviewStatus", ["pending", "dismissed", "concern"]).default("pending").notNull(),
+  reviewedBy: int("reviewedBy").references(() => users.id, { onDelete: "set null" }),
+  reviewedAt: timestamp("reviewedAt"),
   metadata: longtext("metadata").notNull(),
   occurredAt: timestamp("occurredAt").defaultNow().notNull(),
-}, table => [index("proctoring_attempt_idx").on(table.attemptId, table.occurredAt)]);
+}, table => [index("proctoring_attempt_idx").on(table.attemptId, table.occurredAt), index("proctoring_student_idx").on(table.studentId, table.occurredAt), index("proctoring_test_idx").on(table.testId, table.occurredAt)]);
+
+export const proctoringAttemptStates = mysqlTable("proctoring_attempt_states", {
+  attemptId: varchar("attemptId", { length: 64 }).primaryKey().references(() => testAttempts.id, { onDelete: "cascade" }),
+  baseline: longtext("baseline").notNull(),
+  temporalState: longtext("temporalState").notNull(),
+  modelVersion: varchar("modelVersion", { length: 100 }),
+  lastRiskScore: double("lastRiskScore"),
+  lastRiskLevel: mysqlEnum("lastRiskLevel", ["low", "medium", "high"]),
+  serviceStatus: mysqlEnum("serviceStatus", ["ready", "unavailable", "fallback"]).default("unavailable").notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, table => [index("proctoring_state_risk_idx").on(table.lastRiskLevel, table.updatedAt)]);
 
 export const aiGenerationLogs = mysqlTable("ai_generation_logs", {
   id: varchar("id", { length: 64 }).primaryKey(),

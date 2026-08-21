@@ -29,3 +29,20 @@
 - [x] Gate optional face-based proctoring signals behind an actual configured provider and clear UI capability status.
 - [x] Route the default application entry point to the NeuroClass assessment portal instead of the scaffold example page.
 - [x] Push the final NeuroClass portal code to the attached `test_creation` GitHub repository and verify the remote commit.
+- [x] Define privacy-aware proctoring policies, service contracts, baseline behavior, and configurable risk thresholds.
+- [x] Build the independent `ml-proctoring` FastAPI service with lightweight unsupervised anomaly detection and deterministic risk scoring.
+- [x] Add reproducible proctoring model training, evaluation, benchmarking, and 512 MB footprint checks without fabricated accuracy claims.
+- [x] Extend the database and secure Node integration for authenticated proctoring analysis, compact evidence metadata, and service health policies.
+- [x] Add student baseline calibration and low-frequency feature-vector monitoring without transmitting continuous raw video.
+- [x] Add teacher proctoring timeline, integrity/risk review controls, and explicit human-decision safeguards.
+- [x] Add Render-compatible service configuration and document required environment variables, deployment steps, privacy boundaries, and limitations.
+- [x] Validate ML unit tests, Node authorization tests, model tooling, application build, and the updated proctoring workflows.
+- [x] Checkpoint and push the extended AI-proctoring implementation to `chinmaystudio/test_creation`.
+- [x] Keep the portal in an explicit unconfigured ML-service state until the user deploys Render, with no misleading face-verification claim.
+- [x] Provide a complete post-deployment configuration checklist for the Render URL and shared service key without requiring further code changes.
+- [x] Resolve the proctoring-router compile errors introduced by server-derived browser event handling and the public health endpoint.
+- [x] Clarify that raw evidence snapshots are unsupported by the current privacy-first feature-vector deployment.
+- [x] Add targeted automated and documented validation for calibration gating, service-unavailable fallback behavior, and teacher review actions.
+- [x] Resolve TypeScript validation for the browser feature sampler and pre-exam calibration workflow.
+- [x] Resolve strict result narrowing for continuous ML feature-analysis status in the examination client.
+- [x] Gate the timed examination transition on completed baseline calibration or the teacher-selected explicit fallback policy.

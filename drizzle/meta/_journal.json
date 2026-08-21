@@ -15,6 +15,20 @@
       "when": 1787238474385,
       "tag": "0001_complex_malice",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1787327851766,
+      "tag": "0002_swift_tusk",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1787333237661,
+      "tag": "0003_ambiguous_madame_masque",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,34 @@
+{
+  "normal_session": [
+    {"face_present": true, "face_count": 1, "face_bbox_area": 0.24, "head_pose_yaw": 1, "frame_quality": 0.9, "movement_score": 0.1},
+    {"face_present": true, "face_count": 1, "face_bbox_area": 0.25, "head_pose_yaw": -1, "frame_quality": 0.91, "movement_score": 0.11},
+    {"face_present": true, "face_count": 1, "face_bbox_area": 0.24, "head_pose_yaw": 2, "frame_quality": 0.9, "movement_score": 0.09},
+    {"face_present": true, "face_count": 1, "face_bbox_area": 0.25, "head_pose_yaw": 0, "frame_quality": 0.92, "movement_score": 0.1},
+    {"face_present": true, "face_count": 1, "face_bbox_area": 0.24, "head_pose_yaw": -2, "frame_quality": 0.9, "movement_score": 0.11},
+    {"face_present": true, "face_count": 1, "face_bbox_area": 0.25, "head_pose_yaw": 1, "frame_quality": 0.91, "movement_score": 0.1},
+    {"face_present": true, "face_count": 1, "face_bbox_area": 0.24, "head_pose_yaw": 1, "frame_quality": 0.9, "movement_score": 0.1},
+    {"face_present": true, "face_count": 1, "face_bbox_area": 0.25, "head_pose_yaw": 0, "frame_quality": 0.91, "movement_score": 0.1}
+  ],
+  "multiple_face_sequence": [
+    {"face_present": true, "face_count": 1, "face_bbox_area": 0.24, "head_pose_yaw": 0, "frame_quality": 0.9},
+    {"face_present": true, "face_count": 1, "face_bbox_area": 0.24, "head_pose_yaw": 1, "frame_quality": 0.91},
+    {"face_present": true, "face_count": 1, "face_bbox_area": 0.25, "head_pose_yaw": 0, "frame_quality": 0.9},
+    {"face_present": true, "face_count": 1, "face_bbox_area": 0.24, "head_pose_yaw": -1, "frame_quality": 0.9},
+    {"face_present": true, "face_count": 1, "face_bbox_area": 0.25, "head_pose_yaw": 1, "frame_quality": 0.91},
+    {"face_present": true, "face_count": 1, "face_bbox_area": 0.24, "head_pose_yaw": 0, "frame_quality": 0.9},
+    {"face_present": true, "face_count": 2, "face_bbox_area": 0.24, "head_pose_yaw": 0, "frame_quality": 0.9},
+    {"face_present": true, "face_count": 2, "face_bbox_area": 0.24, "head_pose_yaw": 0, "frame_quality": 0.9},
+    {"face_present": true, "face_count": 2, "face_bbox_area": 0.24, "head_pose_yaw": 0, "frame_quality": 0.9}
+  ],
+  "face_absence_sequence": [
+    {"face_present": true, "face_count": 1, "face_bbox_area": 0.24, "frame_quality": 0.9},
+    {"face_present": true, "face_count": 1, "face_bbox_area": 0.25, "frame_quality": 0.91},
+    {"face_present": true, "face_count": 1, "face_bbox_area": 0.24, "frame_quality": 0.9},
+    {"face_present": true, "face_count": 1, "face_bbox_area": 0.25, "frame_quality": 0.9},
+    {"face_present": true, "face_count": 1, "face_bbox_area": 0.24, "frame_quality": 0.91},
+    {"face_present": true, "face_count": 1, "face_bbox_area": 0.25, "frame_quality": 0.9},
+    {"face_present": false, "face_count": 0, "frame_quality": 0.9},
+    {"face_present": false, "face_count": 0, "frame_quality": 0.9},
+    {"face_present": false, "face_count": 0, "frame_quality": 0.9}
+  ]
+}

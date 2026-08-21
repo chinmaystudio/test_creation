@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: neuroclass-ml-proctoring
+    runtime: docker
+    rootDir: ml-proctoring
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: ML_SERVICE_API_KEY
+        sync: false
+      - key: ML_MODEL_VERSION
+        value: robust-baseline-v1.0.0
+      - key: ML_MAX_REQUEST_BYTES
+        value: "65536"
+      - key: ML_RATE_LIMIT_PER_MINUTE
+        value: "180"

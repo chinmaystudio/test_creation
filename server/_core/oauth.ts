@@ -31,7 +31,10 @@ export function registerAuthRoutes(app: Express) {
       return res.status(503).json({ error: "portal database is unavailable" });
     }
     const session = await sdk.signSession(identity, ONE_YEAR_MS);
-    res.cookie(COOKIE_NAME, session, { ...getSessionCookieOptions(req), maxAge: ONE_YEAR_MS });
+    // The portal is embedded cross-origin from Cloudflare Pages. Partitioned
+    // keeps this HttpOnly session available inside that classroom iframe even
+    // when the browser blocks unpartitioned third-party cookies.
+    res.cookie(COOKIE_NAME, session, { ...getSessionCookieOptions(req), maxAge: ONE_YEAR_MS, partitioned: true } as any);
     const safeRedirect = redirect.startsWith("/") && !redirect.startsWith("//") ? redirect : "/";
     return res.redirect(302, safeRedirect);
   });
@@ -47,7 +50,10 @@ export function registerAuthRoutes(app: Express) {
     const user = await db.upsertHandoffUser({ openId: identity.userId, email: identity.email, name: identity.name, role: identity.role });
     if (!user) return res.status(503).json({ error: "portal database is unavailable" });
     const session = await sdk.signSession(identity, ONE_YEAR_MS);
-    res.cookie(COOKIE_NAME, session, { ...getSessionCookieOptions(req), maxAge: ONE_YEAR_MS });
+    // The portal is embedded cross-origin from Cloudflare Pages. Partitioned
+    // keeps this HttpOnly session available inside that classroom iframe even
+    // when the browser blocks unpartitioned third-party cookies.
+    res.cookie(COOKIE_NAME, session, { ...getSessionCookieOptions(req), maxAge: ONE_YEAR_MS, partitioned: true } as any);
     return res.json({ ok: true, user: { email: identity.email, role: identity.role } });
   });
 }

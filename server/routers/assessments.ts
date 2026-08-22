@@ -141,7 +141,7 @@ async function activeStudentAttempt(attemptId: string, studentId: number, allowC
 }
 
 async function setProctoringState(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, attemptId: string, values: { baseline: Record<string, unknown>; temporalState: Record<string, unknown>; modelVersion?: string | null; lastRiskScore?: number | null; lastRiskLevel?: "low" | "medium" | "high" | null; serviceStatus: "ready" | "unavailable" | "fallback" }) {
-  await db.insert(proctoringAttemptStates).values({ attemptId, baseline: JSON.stringify(values.baseline), temporalState: JSON.stringify(values.temporalState), modelVersion: values.modelVersion ?? null, lastRiskScore: values.lastRiskScore ?? null, lastRiskLevel: values.lastRiskLevel ?? null, serviceStatus: values.serviceStatus }).onDuplicateKeyUpdate({ set: { baseline: JSON.stringify(values.baseline), temporalState: JSON.stringify(values.temporalState), modelVersion: values.modelVersion ?? null, lastRiskScore: values.lastRiskScore ?? null, lastRiskLevel: values.lastRiskLevel ?? null, serviceStatus: values.serviceStatus, updatedAt: new Date() } });
+  await db.insert(proctoringAttemptStates).values({ attemptId, baseline: JSON.stringify(values.baseline), temporalState: JSON.stringify(values.temporalState), modelVersion: values.modelVersion ?? null, lastRiskScore: values.lastRiskScore ?? null, lastRiskLevel: values.lastRiskLevel ?? null, serviceStatus: values.serviceStatus }).onConflictDoUpdate({ target: proctoringAttemptStates.attemptId, set: { baseline: JSON.stringify(values.baseline), temporalState: JSON.stringify(values.temporalState), modelVersion: values.modelVersion ?? null, lastRiskScore: values.lastRiskScore ?? null, lastRiskLevel: values.lastRiskLevel ?? null, serviceStatus: values.serviceStatus, updatedAt: new Date() } });
 }
 
 function normalizeAnswer(value: string): string {
@@ -343,7 +343,7 @@ export const assessmentRouter = router({
       if (!question) throw new TRPCError({ code: "NOT_FOUND", message: "Question not found." });
       const existing = await db.select({ position: testQuestions.position }).from(testQuestions).where(eq(testQuestions.testId, test.id));
       const position = input.position ?? (existing.length ? Math.max(...existing.map(item => item.position)) + 1 : 0);
-      await db.insert(testQuestions).values({ testId: test.id, questionId: input.questionId, position }).onDuplicateKeyUpdate({ set: { position } });
+      await db.insert(testQuestions).values({ testId: test.id, questionId: input.questionId, position }).onConflictDoUpdate({ target: [testQuestions.testId, testQuestions.questionId], set: { position } });
       return { success: true };
     }),
     detachQuestion: teacherProcedure.input(z.object({ testId: z.string(), questionId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
@@ -407,8 +407,8 @@ export const assessmentRouter = router({
     create: teacherProcedure.input(questionInputSchema.extend({ subject: z.string().min(1).max(200) })).mutation(async ({ ctx, input }) => {
       const db = requireDb(await getDb());
       const { options, ...questionInput } = input;
-      const result = await db.insert(questions).values({ ...questionInput, ownerId: ctx.user.id });
-      const questionId = Number(result[0].insertId);
+      const result = await db.insert(questions).values({ ...questionInput, ownerId: ctx.user.id }).returning({ id: questions.id });
+      const questionId = Number(result[0].id);
       if (options.length) await db.insert(questionOptions).values(options.map((option, position) => ({ questionId, position, ...option })));
       return { id: questionId };
     }),
@@ -433,8 +433,9 @@ export const assessmentRouter = router({
       const db = requireDb(await getDb());
       const [source] = await db.select().from(questions).where(and(eq(questions.id, input.questionId), eq(questions.ownerId, ctx.user.id))).limit(1);
       if (!source) throw new TRPCError({ code: "NOT_FOUND", message: "Question not found." });
-      const result = await db.insert(questions).values({ ...source, id: undefined, questionText: `${source.questionText} (Copy)`, createdAt: new Date(), updatedAt: new Date() });
-      const questionId = Number(result[0].insertId);
+      const { id: _ignore, ...sourceWithoutId } = source;
+      const result = await db.insert(questions).values({ ...sourceWithoutId, questionText: `${source.questionText} (Copy)`, createdAt: new Date(), updatedAt: new Date() }).returning({ id: questions.id });
+      const questionId = Number(result[0].id);
       const sourceOptions = await db.select().from(questionOptions).where(eq(questionOptions.questionId, source.id));
       if (sourceOptions.length) await db.insert(questionOptions).values(sourceOptions.map(option => ({ questionId, position: option.position, text: option.text, isCorrect: option.isCorrect })));
       return { id: questionId };
@@ -569,7 +570,7 @@ export const assessmentRouter = router({
       }
       const [linked] = await db.select().from(testQuestions).where(and(eq(testQuestions.testId, attempt.testId), eq(testQuestions.questionId, input.questionId))).limit(1);
       if (!linked) throw new TRPCError({ code: "FORBIDDEN", message: "Question is not part of this assessment." });
-      await db.insert(attemptAnswers).values({ attemptId: attempt.id, questionId: input.questionId, answer: input.answer, markedForReview: input.markedForReview }).onDuplicateKeyUpdate({ set: { answer: input.answer, markedForReview: input.markedForReview, savedAt: new Date() } });
+      await db.insert(attemptAnswers).values({ attemptId: attempt.id, questionId: input.questionId, answer: input.answer, markedForReview: input.markedForReview }).onConflictDoUpdate({ target: [attemptAnswers.attemptId, attemptAnswers.questionId], set: { answer: input.answer, markedForReview: input.markedForReview, savedAt: new Date() } });
       return { savedAt: new Date() };
     }),
     submit: studentProcedure.input(z.object({ attemptId: z.string() })).mutation(async ({ ctx, input }) => {

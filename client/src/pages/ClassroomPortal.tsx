@@ -4,9 +4,13 @@ import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { startLogin } from "@/const";
 
+import { useEffect } from "react";
+import { useLocation } from "wouter";
+
 export default function ClassroomPortal() {
   const { classroomId } = useParams<{ classroomId: string }>();
   const { isAuthenticated } = useAuth();
+  const [, setLocation] = useLocation();
   const context = trpc.sharedClassroom.context.useQuery({ classroomId: classroomId ?? "00000000-0000-0000-0000-000000000000" }, { enabled: Boolean(classroomId && isAuthenticated) });
   const [active, setActive] = useState<any>(null);
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
@@ -20,6 +24,17 @@ export default function ClassroomPortal() {
   const [newAnswer, setNewAnswer] = useState("");
   const tests = context.data?.tests ?? [];
   const activeQuestions = useMemo(() => active?.test?.questions ?? [], [active]);
+
+  // Intercept the classroom view and redirect to the new command center dashboard
+  // based on the user's role.
+  useEffect(() => {
+    if (context.data?.role === "teacher") {
+      setLocation("/teacher/tests");
+    } else if (context.data?.role === "student") {
+      setLocation("/student/tests");
+    }
+  }, [context.data?.role, setLocation]);
+
   const verifyFromCamera = async () => {
     const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
     const video = document.createElement("video");

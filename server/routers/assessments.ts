@@ -619,9 +619,23 @@ export const assessmentRouter = router({
       if (!security.aiProctoringEnabled || !isMlProctoringConfigured()) return { ready: false, baselineReady: false };
       const [stored] = await db.select().from(proctoringAttemptStates).where(eq(proctoringAttemptStates.attemptId, attempt.id)).limit(1);
       if (!stored) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Start a proctoring baseline before finalizing it." });
-      const baseline = await finalizeMlBaseline(attempt.id, parseConfig<Record<string, unknown>>(stored.baseline, {}), input.features as MlFeatureVector);
-      await setProctoringState(db, attempt.id, { baseline, temporalState: parseConfig<Record<string, unknown>>(stored.temporalState, {}), modelVersion: stored.modelVersion, lastRiskScore: stored.lastRiskScore, lastRiskLevel: stored.lastRiskLevel, serviceStatus: "ready" });
-      return { ready: true, baselineReady: Boolean(baseline.finalized), baseline };
+      
+      const currentBaseline = parseConfig<Record<string, unknown>>(stored.baseline, {});
+      // Idempotency: if already finalized, return success immediately
+      if (currentBaseline.finalized) {
+        return { ready: true, baselineReady: true, baseline: currentBaseline, alreadyFinalized: true };
+      }
+      
+      try {
+        const baseline = await finalizeMlBaseline(attempt.id, currentBaseline, input.features as MlFeatureVector);
+        await setProctoringState(db, attempt.id, { baseline, temporalState: parseConfig<Record<string, unknown>>(stored.temporalState, {}), modelVersion: stored.modelVersion, lastRiskScore: stored.lastRiskScore, lastRiskLevel: stored.lastRiskLevel, serviceStatus: "ready" });
+        return { ready: true, baselineReady: Boolean(baseline.finalized), baseline };
+      } catch (e) {
+        // If the service is unreachable but we already have some baseline data, don't fail the exam start
+        // Just return what we have so the student can proceed if the policy allows
+        console.error("[baselineFinalize] Failed to finalize ML baseline:", e);
+        return { ready: false, baselineReady: false, baseline: currentBaseline, error: String(e) };
+      }
     }),
     analyze: studentProcedure.input(z.object({ attemptId: z.string(), features: mlFeatureVectorSchema, faceVerified: z.boolean().optional() })).mutation(async ({ ctx, input }) => {
       const { db, attempt, security } = await activeStudentAttempt(input.attemptId, ctx.user.id);

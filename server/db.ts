@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import postgres from 'postgres';
 import { drizzle } from "drizzle-orm/postgres-js";
-import { InsertUser, users } from "../drizzle/schema";
+import { InsertUser, User, users } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -109,19 +109,19 @@ export function getSql() {
 
 
 export async function upsertHandoffUser(input: { openId: string; email: string; name: string; role: "teacher" | "student" | "admin" }) {
-  const db = await getDb();
-  if (!db) return undefined;
-  await db.insert(users).values({
+  // Production classroom authorization uses the Supabase identity directly.
+  // Do not write to the legacy tc_users table: NeuroClass and the portal share
+  // the existing public NeuroClass tables, not a portal-local user database.
+  const now = new Date();
+  return {
+    id: 0,
     openId: input.openId,
     email: input.email,
     name: input.name,
-    role: input.role,
     loginMethod: "supabase-handoff",
-    lastSignedIn: new Date(),
-  }).onConflictDoUpdate({
-    target: users.openId,
-    set: { email: input.email, name: input.name, role: input.role, loginMethod: "supabase-handoff", lastSignedIn: new Date(), updatedAt: new Date() },
-  });
-  const result = await db.select().from(users).where(eq(users.openId, input.openId)).limit(1);
-  return result[0];
+    role: input.role,
+    createdAt: now,
+    updatedAt: now,
+    lastSignedIn: now,
+  } as User;
 }

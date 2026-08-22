@@ -14,7 +14,7 @@ export type SessionPayload = IdentityPayload & { kind: "portal-session" };
 export type HandoffPayload = IdentityPayload & { kind: "neuroclass-handoff"; aud: "test_creation" };
 
 function secret() {
-  const value = ENV.handoffSecret || ENV.cookieSecret;
+  const value = process.env.PORTAL_HANDOFF_SECRET || ENV.handoffSecret || ENV.cookieSecret;
   if (!value || value.length < 32) throw new Error("PORTAL_HANDOFF_SECRET/JWT_SECRET must be at least 32 characters.");
   return new TextEncoder().encode(value);
 }

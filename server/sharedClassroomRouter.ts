@@ -31,14 +31,14 @@ function identityCandidates(user: { openId?: string | null; email?: string | nul
 
 async function assertTeacher(sql: SharedSql, user: any, classroomId: string) {
   const candidates = identityCandidates(user);
-  const rows = await sql`SELECT id, name, subject FROM public.classrooms WHERE id = ${classroomId}::uuid AND user_id = ANY(${candidates}) LIMIT 1`;
+  const rows = await sql`SELECT id, name, subject FROM public.classrooms WHERE id = ${classroomId}::uuid AND user_id::text = ANY(${candidates}::text[]) LIMIT 1`;
   if (!rows[0]) throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this classroom." });
   return rows[0];
 }
 
 async function getStudent(sql: SharedSql, user: any, classroomId: string) {
   const candidates = identityCandidates(user);
-  const rows = await sql`SELECT id, name, email, classroom_id FROM public.students WHERE classroom_id = ${classroomId}::uuid AND (user_id = ANY(${candidates}) OR (email IS NOT NULL AND email = ${user.email ?? ""})) LIMIT 1`;
+  const rows = await sql`SELECT id, name, email, classroom_id FROM public.students WHERE classroom_id = ${classroomId}::uuid AND (user_id::text = ANY(${candidates}::text[]) OR (email IS NOT NULL AND email = ${user.email ?? ""})) LIMIT 1`;
   if (!rows[0]) throw new TRPCError({ code: "FORBIDDEN", message: "You are not enrolled in this classroom." });
   return rows[0];
 }

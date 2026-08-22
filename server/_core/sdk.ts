@@ -35,9 +35,15 @@ export class SDKServer {
     try {
       const { payload } = await jwtVerify(token, secret(), { algorithms: ["HS256"], issuer: "neuroclass", audience: "test_creation" });
       const value = payload as Record<string, unknown>;
-      if (value.kind !== "neuroclass-handoff" || !isNonEmptyString(value.userId) || !isNonEmptyString(value.email) || !isNonEmptyString(value.name) || !["teacher", "student", "admin"].includes(String(value.role))) return null;
+      if (value.kind !== "neuroclass-handoff" || !isNonEmptyString(value.userId) || !isNonEmptyString(value.email) || !isNonEmptyString(value.name) || !["teacher", "student", "admin"].includes(String(value.role))) {
+        console.error("[Handoff SDK] Payload validation failed:", value);
+        return null;
+      }
       return { userId: value.userId, email: value.email, name: value.name, role: value.role as HandoffPayload["role"], classroomId: isNonEmptyString(value.classroomId) ? value.classroomId : undefined, kind: "neuroclass-handoff", aud: "test_creation" };
-    } catch { return null; }
+    } catch (e) {
+      console.error("[Handoff SDK] JWT verification failed:", e);
+      return null;
+    }
   }
 
   async signSession(identity: IdentityPayload, expiresInMs = ONE_YEAR_MS) {

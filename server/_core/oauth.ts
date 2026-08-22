@@ -18,9 +18,18 @@ export function registerAuthRoutes(app: Express) {
     const redirect = query(req, "redirect") || "/";
     if (!token) return res.status(400).json({ error: "handoff token is required" });
     const identity = await sdk.verifyHandoff(token);
-    if (!identity) return res.status(401).json({ error: "handoff token is invalid or expired" });
-    const user = await db.upsertHandoffUser({ openId: identity.userId, email: identity.email, name: identity.name, role: identity.role });
-    if (!user) return res.status(503).json({ error: "portal database is unavailable" });
+    if (!identity) {
+      console.error("[Handoff] Invalid or expired handoff token received.");
+      return res.status(401).json({ error: "handoff token is invalid or expired" });
+    }
+    const user = await db.upsertHandoffUser({ openId: identity.userId, email: identity.email, name: identity.name, role: identity.role }).catch(e => {
+      console.error("[Handoff] Database upsert failed:", e);
+      return undefined;
+    });
+    if (!user) {
+      console.error("[Handoff] Failed to retrieve or create user in portal database.");
+      return res.status(503).json({ error: "portal database is unavailable" });
+    }
     const session = await sdk.signSession(identity, ONE_YEAR_MS);
     res.cookie(COOKIE_NAME, session, { ...getSessionCookieOptions(req), maxAge: ONE_YEAR_MS });
     const safeRedirect = redirect.startsWith("/") && !redirect.startsWith("//") ? redirect : "/";

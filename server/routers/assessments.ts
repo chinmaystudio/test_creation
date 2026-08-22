@@ -450,7 +450,9 @@ export const assessmentRouter = router({
       questionTypes: z.array(questionTypeSchema).min(1),
       marksPerQuestion: z.number().min(0.25).max(100),
       learningObjective: z.string().min(3).max(500),
-      referenceMaterial: z.string().max(12000).optional(),
+      generationMode: z.enum(["material_format", "knowledge_base"]).default("material_format"),
+      formatPlan: z.string().max(1000).optional(),
+      referenceMaterial: z.string().max(50000).optional(),
     })).mutation(async ({ ctx, input }) => {
       if (input.testId) await ownedTest(input.testId, ctx.user.id);
       const candidates = await aiProvider.generateQuestions(input);

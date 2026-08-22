@@ -109,19 +109,31 @@ export function getSql() {
 
 
 export async function upsertHandoffUser(input: { openId: string; email: string; name: string; role: "teacher" | "student" | "admin" }) {
-  // Production classroom authorization uses the Supabase identity directly.
-  // Do not write to the legacy tc_users table: NeuroClass and the portal share
-  // the existing public NeuroClass tables, not a portal-local user database.
+  // Question and assessment records reference tc_users.id. Handoff users must
+  // therefore be materialized in the portal database instead of using a
+  // synthetic id:0, while the Supabase identity remains the source of auth.
+  const db = await getDb();
+  if (!db) throw new Error("Portal database is unavailable.");
   const now = new Date();
-  return {
-    id: 0,
+  const [record] = await db.insert(users).values({
     openId: input.openId,
     email: input.email,
     name: input.name,
     loginMethod: "supabase-handoff",
     role: input.role,
-    createdAt: now,
-    updatedAt: now,
     lastSignedIn: now,
-  } as User;
+    updatedAt: now,
+  }).onConflictDoUpdate({
+    target: users.openId,
+    set: {
+      email: input.email,
+      name: input.name,
+      loginMethod: "supabase-handoff",
+      role: input.role,
+      lastSignedIn: now,
+      updatedAt: now,
+    },
+  }).returning();
+  if (!record) throw new Error("Unable to persist the authenticated portal user.");
+  return record;
 }

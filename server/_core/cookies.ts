@@ -43,6 +43,8 @@ export function getSessionCookieOptions(
     httpOnly: true,
     path: "/",
     sameSite: "none",
-    secure: isSecureRequest(req),
+    // Render terminates TLS at its proxy; force Secure for production so
+    // Chromium accepts SameSite=None cookies after the cross-site handoff.
+    secure: process.env.NODE_ENV === "production" || isSecureRequest(req),
   };
 }

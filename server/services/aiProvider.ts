@@ -50,7 +50,6 @@ const generatedQuestionSchema = {
                 isCorrect: { type: "boolean" },
               },
               required: ["text", "isCorrect"],
-              additionalProperties: false,
             },
           },
           correctAnswer: { type: "string" },
@@ -73,12 +72,10 @@ const generatedQuestionSchema = {
           "learningObjective",
           "qualityWarnings",
         ],
-        additionalProperties: false,
       },
     },
   },
   required: ["questions"],
-  additionalProperties: false,
 } as const;
 
 const typeAliases: Array<[RegExp, QuestionType]> = [

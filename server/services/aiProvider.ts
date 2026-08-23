@@ -129,7 +129,8 @@ export class GeminiAIProvider implements AIProvider {
   async generateQuestions(input: GenerateQuestionsInput): Promise<CandidateQuestion[]> {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) throw new Error("Gemini API is not configured. Add GEMINI_API_KEY to the test-creation service.");
-    const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+    const configuredModel = process.env.GEMINI_MODEL?.trim();
+    const model = configuredModel && configuredModel !== "gemini-2.5-flash" ? configuredModel : "gemini-3.6-flash";
     const format = parseFormatPlan(input);
     const total = format.reduce((sum, item) => sum + item.count, 0);
     if (total > 15) throw new Error("The ordered format plan can contain at most 15 questions per generation.");

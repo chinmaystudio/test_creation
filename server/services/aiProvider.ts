@@ -31,6 +31,56 @@ const QUESTION_TYPES: QuestionType[] = [
   "coding",
 ];
 
+const generatedQuestionSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    questions: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          questionText: { type: "string" },
+          type: { type: "string", enum: QUESTION_TYPES },
+          options: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                text: { type: "string" },
+                isCorrect: { type: "boolean" },
+              },
+              required: ["text", "isCorrect"],
+            },
+          },
+          correctAnswer: { type: "string" },
+          explanation: { type: "string" },
+          marks: { type: "number" },
+          difficulty: { type: "string", enum: ["easy", "medium", "hard"] },
+          topic: { type: "string" },
+          learningObjective: { type: "string" },
+          qualityWarnings: { type: "array", items: { type: "string" } },
+        },
+        required: [
+          "questionText",
+          "type",
+          "options",
+          "correctAnswer",
+          "explanation",
+          "marks",
+          "difficulty",
+          "topic",
+          "learningObjective",
+          "qualityWarnings",
+        ],
+      },
+    },
+  },
+  required: ["questions"],
+} as const;
+
 const typeAliases: Array<[RegExp, QuestionType]> = [
   [/multiple[ _-]?select|multiple[ _-]?choice|multi[ _-]?select/i, "multiple_select"],
   [/true[ _/-]?false|true[ /_-]+or[ /_-]+false/i, "true_false"],
@@ -89,7 +139,7 @@ export class OpenRouterAIProvider implements AIProvider {
   async generateQuestions(input: GenerateQuestionsInput): Promise<CandidateQuestion[]> {
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) throw new Error("OpenRouter API is not configured. Add OPENROUTER_API_KEY to the test-creation service.");
-    const model = process.env.OPENROUTER_MODEL?.trim() || "nvidia/nemotron-3-ultra-550b-a55b:free";
+    const model = process.env.OPENROUTER_MODEL?.trim() || "nvidia/nemotron-3-super-120b-a12b:free";
     const format = parseFormatPlan(input);
     const total = format.reduce((sum, item) => sum + item.count, 0);
     if (total > 15) throw new Error("The ordered format plan can contain at most 15 questions per generation.");
@@ -130,6 +180,14 @@ export class OpenRouterAIProvider implements AIProvider {
         ],
         temperature: 0.2,
         max_tokens: Math.min(24000, Math.max(4000, total * 900)),
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "assessment_question_set",
+            strict: true,
+            schema: generatedQuestionSchema,
+          },
+        },
         stream: false,
       }),
       signal: AbortSignal.timeout(60_000),

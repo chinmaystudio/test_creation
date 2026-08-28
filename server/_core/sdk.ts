@@ -64,11 +64,15 @@ export class SDKServer {
     } catch { return null; }
   }
 
-  async authenticateRequest(req: Request): Promise<User> {
+  async getSessionFromRequest(req: Request): Promise<SessionPayload | null> {
     const cookies = parseCookieHeader(req.headers.cookie ?? "");
     let token = cookies[COOKIE_NAME];
     if (!token && typeof req.headers.authorization === "string" && req.headers.authorization.startsWith("Bearer ")) token = req.headers.authorization.slice(7);
-    const session = await this.verifySession(token);
+    return this.verifySession(token);
+  }
+
+  async authenticateRequest(req: Request): Promise<User> {
+    const session = await this.getSessionFromRequest(req);
     if (!session) throw ForbiddenError("Authentication handoff/session is missing or expired.");
     const user = await db.upsertHandoffUser({ openId: session.userId, email: session.email, name: session.name, role: session.role });
     if (!user) throw ForbiddenError("Portal identity could not be established.");

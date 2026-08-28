@@ -111,6 +111,15 @@ function requireDb<T>(db: T | null): T {
   return db;
 }
 
+function classroomIdForContext(ctx: { session?: { classroomId?: string } | null }, requested?: string | null): string | null {
+  const requestedId = typeof requested === "string" && requested.trim() ? requested.trim() : null;
+  const sessionId = typeof ctx.session?.classroomId === "string" && ctx.session.classroomId.trim() ? ctx.session.classroomId.trim() : null;
+  if (requestedId && sessionId && requestedId !== sessionId) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "This assessment must stay within the classroom that opened the portal." });
+  }
+  return requestedId || sessionId;
+}
+
 function parseConfig<T>(value: string | null | undefined, fallback: T): T {
   if (!value) return fallback;
   try {
@@ -289,7 +298,7 @@ export const assessmentRouter = router({
           name: input.name,
           description: input.description ?? null,
           subject: input.subject,
-          classroomId: input.classroomId ?? null,
+          classroomId: classroomIdForContext(ctx, input.classroomId),
           topic: input.topic ?? null,
           difficulty: input.difficulty,
           instructions: input.instructions ?? null,
@@ -316,6 +325,7 @@ export const assessmentRouter = router({
         difficulty: z.enum(["easy", "medium", "hard"]).optional(),
         instructions: z.string().max(10000).nullable().optional(),
         totalMarks: z.number().min(0).max(10000).optional(),
+        classroomId: z.string().max(64).nullable().optional(),
         scheduledStart: z.date().nullable().optional(),
         scheduledEnd: z.date().nullable().optional(),
         configuration: testConfigurationSchema.partial().optional(),
@@ -326,6 +336,7 @@ export const assessmentRouter = router({
         const [existingSettings] = await db.select().from(testSettings).where(eq(testSettings.testId, test.id)).limit(1);
         const update = { ...input };
         delete (update as { testId?: string }).testId;
+        if ("classroomId" in update) update.classroomId = classroomIdForContext(ctx, update.classroomId);
         delete (update as { configuration?: unknown }).configuration;
         delete (update as { security?: unknown }).security;
         if (Object.keys(update).length > 0) await db.update(tests).set(update).where(eq(tests.id, test.id));
@@ -371,8 +382,12 @@ export const assessmentRouter = router({
       const attached = await db.select({ id: testQuestions.questionId }).from(testQuestions).where(eq(testQuestions.testId, test.id));
       const publicationError = validatePublication(input.mode, attached.length, test.scheduledStart, test.scheduledEnd);
       if (publicationError) throw new TRPCError({ code: "BAD_REQUEST", message: publicationError });
+      const classroomId = test.classroomId || classroomIdForContext(ctx, null);
+      if (!test.classroomId && classroomId) {
+        await db.update(tests).set({ classroomId }).where(eq(tests.id, test.id));
+      }
       await db.update(tests).set({ status: input.mode === "schedule" ? "scheduled" : "live" }).where(eq(tests.id, test.id));
-      return { success: true };
+      return { success: true, classroomId };
     }),
     archive: teacherProcedure.input(z.object({ testId: z.string() })).mutation(async ({ ctx, input }) => {
       const { db, test } = await ownedTest(input.testId, ctx.user.id);
@@ -472,6 +487,16 @@ export const assessmentRouter = router({
   studentTests: router({
     list: studentProcedure.query(async ({ ctx }) => {
       const db = requireDb(await getDb());
+      const classroomId = ctx.session?.classroomId;
+      if (classroomId) {
+        return db
+          .select({ test: tests, settings: testSettings, teacherName: users.name })
+          .from(tests)
+          .leftJoin(testSettings, eq(testSettings.testId, tests.id))
+          .leftJoin(users, eq(users.id, tests.creatorId))
+          .where(and(eq(tests.classroomId, classroomId), inArray(tests.status, ["live", "scheduled"])))
+          .orderBy(asc(tests.scheduledStart));
+      }
       return db
         .select({ test: tests, settings: testSettings, teacherName: users.name })
         .from(testAssignments)
@@ -482,12 +507,16 @@ export const assessmentRouter = router({
         .orderBy(asc(tests.scheduledStart));
     }),
   }),
-  attempts: router({
+    attempts: router({
     start: studentProcedure.input(z.object({ testId: z.string().min(1), preflight: z.boolean().optional() })).mutation(async ({ ctx, input }) => {
       const db = requireDb(await getDb());
-      const [assignment] = await db.select().from(testAssignments).where(and(eq(testAssignments.testId, input.testId), eq(testAssignments.studentId, ctx.user.id))).limit(1);
-      if (!assignment) throw new TRPCError({ code: "FORBIDDEN", message: "This assessment is not assigned to you." });
       const [test] = await db.select().from(tests).where(eq(tests.id, input.testId)).limit(1);
+      if (ctx.session?.classroomId) {
+        if (!test || test.classroomId !== ctx.session.classroomId) throw new TRPCError({ code: "FORBIDDEN", message: "This assessment is not available in your classroom." });
+      } else {
+        const [assignment] = await db.select().from(testAssignments).where(and(eq(testAssignments.testId, input.testId), eq(testAssignments.studentId, ctx.user.id))).limit(1);
+        if (!assignment) throw new TRPCError({ code: "FORBIDDEN", message: "This assessment is not assigned to you." });
+      }
       if (!test || test.status !== "live") throw new TRPCError({ code: "BAD_REQUEST", message: "This assessment is not currently available." });
       const security = parseConfig<SecurityConfiguration>(test.securityConfig, DEFAULT_SECURITY_CONFIGURATION);
       if (security.aiProctoringEnabled && serviceFailureBlocksAttempt(security, (await mlServiceHealth()).ready)) {

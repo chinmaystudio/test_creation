@@ -120,6 +120,11 @@ function classroomIdForContext(ctx: { session?: { classroomId?: string } | null 
   return requestedId || sessionId;
 }
 
+async function isNeuroClassStudentEnrolled(db: any, classroomId: string, userId: string): Promise<boolean> {
+  const rows = await db.execute(sql`SELECT id FROM public.students WHERE classroom_id = ${classroomId}::uuid AND user_id = ${userId} LIMIT 1`);
+  return rows.length > 0;
+}
+
 function parseConfig<T>(value: string | null | undefined, fallback: T): T {
   if (!value) return fallback;
   try {
@@ -489,6 +494,7 @@ export const assessmentRouter = router({
       const db = requireDb(await getDb());
       const classroomId = ctx.session?.classroomId;
       if (classroomId) {
+        if (!ctx.session?.userId || !(await isNeuroClassStudentEnrolled(db, classroomId, ctx.session.userId))) return [];
         return db
           .select({ test: tests, settings: testSettings, teacherName: users.name })
           .from(tests)
@@ -512,6 +518,7 @@ export const assessmentRouter = router({
       const db = requireDb(await getDb());
       const [test] = await db.select().from(tests).where(eq(tests.id, input.testId)).limit(1);
       if (ctx.session?.classroomId) {
+        if (!ctx.session.userId || !(await isNeuroClassStudentEnrolled(db, ctx.session.classroomId, ctx.session.userId))) throw new TRPCError({ code: "FORBIDDEN", message: "You are not enrolled in this classroom." });
         if (!test || test.classroomId !== ctx.session.classroomId) throw new TRPCError({ code: "FORBIDDEN", message: "This assessment is not available in your classroom." });
       } else {
         const [assignment] = await db.select().from(testAssignments).where(and(eq(testAssignments.testId, input.testId), eq(testAssignments.studentId, ctx.user.id))).limit(1);

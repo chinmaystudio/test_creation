@@ -120,6 +120,18 @@ function classroomIdForContext(ctx: { session?: { classroomId?: string } | null 
   return requestedId || sessionId;
 }
 
+async function classroomIdForWrite(db: any, ctx: { session?: { classroomId?: string } | null }, requested: string | null | undefined, teacherId: number): Promise<string | null> {
+  const candidate = classroomIdForContext(ctx, requested);
+  if (!candidate) return null;
+  try {
+    return await ensureClassroomMirror(db, candidate, teacherId);
+  } catch (error) {
+    const isStaleSession = !requested && ctx.session?.classroomId === candidate && error instanceof TRPCError && ["NOT_FOUND", "BAD_REQUEST"].includes(error.code);
+    if (isStaleSession) return null;
+    throw error;
+  }
+}
+
 async function ensureClassroomMirror(db: any, classroomId: string, teacherId: number): Promise<string> {
   const [existing] = await db.select({ id: classrooms.id }).from(classrooms).where(eq(classrooms.id, classroomId)).limit(1);
   if (existing) return classroomId;
@@ -312,8 +324,7 @@ export const assessmentRouter = router({
       .mutation(async ({ ctx, input }) => {
         const db = requireDb(await getDb());
         const id = nanoid();
-        const requestedClassroomId = classroomIdForContext(ctx, input.classroomId);
-        const classroomId = requestedClassroomId ? await ensureClassroomMirror(db, requestedClassroomId, ctx.user.id) : null;
+        const classroomId = await classroomIdForWrite(db, ctx, input.classroomId, ctx.user.id);
         await db.insert(tests).values({
           id,
           creatorId: ctx.user.id,
@@ -359,8 +370,7 @@ export const assessmentRouter = router({
         const update = { ...input };
         delete (update as { testId?: string }).testId;
         if ("classroomId" in update) {
-          const requestedClassroomId = classroomIdForContext(ctx, update.classroomId);
-          update.classroomId = requestedClassroomId ? await ensureClassroomMirror(db, requestedClassroomId, ctx.user.id) : null;
+          update.classroomId = await classroomIdForWrite(db, ctx, update.classroomId, ctx.user.id);
         }
         delete (update as { configuration?: unknown }).configuration;
         delete (update as { security?: unknown }).security;
@@ -407,8 +417,7 @@ export const assessmentRouter = router({
       const attached = await db.select({ id: testQuestions.questionId }).from(testQuestions).where(eq(testQuestions.testId, test.id));
       const publicationError = validatePublication(input.mode, attached.length, test.scheduledStart, test.scheduledEnd);
       if (publicationError) throw new TRPCError({ code: "BAD_REQUEST", message: publicationError });
-      const requestedClassroomId = test.classroomId || classroomIdForContext(ctx, null);
-      const classroomId = requestedClassroomId ? await ensureClassroomMirror(db, requestedClassroomId, ctx.user.id) : null;
+      const classroomId = test.classroomId || await classroomIdForWrite(db, ctx, null, ctx.user.id);
       if (!test.classroomId && classroomId) {
         await db.update(tests).set({ classroomId }).where(eq(tests.id, test.id));
       }
